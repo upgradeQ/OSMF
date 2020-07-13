@@ -1,14 +1,19 @@
 import time as _time
 import operator
+import hashlib
+from struct import unpack
+from shutil import copy
 from pathlib import Path
 from multiprocessing import Pool
 
-
+# EDIT THIS
 song_path = r"F:\ULL\PATH\TO\osu\songs"
-
-
 min_bpm = 140
 max_bpm = 9999
+
+
+_p = Path(song_path)
+collection_db = _p.absolute().parent / "collection.db"
 timestamp = int(_time.time())
 file_name = f"Stream maps[{min_bpm}-{max_bpm}] {timestamp}.txt"
 
@@ -147,11 +152,13 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
 
     if stream_percentage >= 25 and main_bpm >= min_bpm and main_bpm <= max_bpm:
         with open(file_name, "a") as f:
-            print(beatmap["title"])
+            print(
+                beatmap["title"], beatmap["difficulty"], f" {int(stream_percentage)}%"
+            )
             f.write(
                 f'{beatmap["artist"]} - {beatmap["title"]} [{beatmap["difficulty"]}] | Main BPM: {main_bpm} | Total Streams: {total_streams} ({int(stream_percentage)}% Streams)\n'
             )
-            return beatmap["title"]
+            return of
     return False
 
 
@@ -170,11 +177,117 @@ def get_osu_files(pathlib_object):
     osufiles = []
 
     for i in paths:
-        _osufiles = list(Path(i).glob("*.osu"))
-        for osufile in _osufiles:
+        for osufile in Path(i).glob("*.osu"):
             osufiles.append(osufile)
 
     return osufiles
+
+
+def md5(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+
+def nextint(f):
+    return unpack("<I", f.read(4))[0]
+
+
+def nextstr(f):
+    if f.read(1) == 0x00:
+        return
+    len = 0
+    shift = 0
+    while True:
+        byte = ord(f.read(1))
+        len |= (byte & 0b01111111) << shift
+        if (byte & 0b10000000) == 0:
+            break
+        shift += 7
+    return f.read(len).decode("utf-8")
+
+
+def get_collections():
+    """read .db file, return raw collection"""
+    col = {}
+    f = open(collection_db, "rb")
+    version = nextint(f)
+    ncol = nextint(f)
+    for i in range(ncol):
+        colname = nextstr(f)
+        col[colname] = []
+        for j in range(nextint(f)):
+            f.read(2)
+            col[colname].append(f.read(32).decode("utf-8"))
+    f.close()
+    return (col, version)
+
+
+def write_int(file, integer):
+    int_b = integer.to_bytes(4, "little")
+    file.write(int_b)
+
+
+def get_uleb128(integer):
+    result = 0
+    shift = 0
+    while True:
+        byte = integer
+
+        result |= (byte & 0x7F) << shift
+        # Detect last byte:
+        if byte & 0x80 == 0:
+            break
+        shift += 7
+    return result.to_bytes(1, "little")
+
+
+def write_string(file, string):
+    if not string:
+        # If the string is empty, the string consists of just this byte
+        return bytes([0x00])
+    else:
+        # Else, it starts with 0x0b
+        result = bytes([0x0B])
+
+        # Followed by the length of the string as an ULEB128
+        result += get_uleb128(len(string))
+
+        # Followed by the string in UTF-8
+        result += string.encode("utf-8")
+        file.write(result)
+
+
+def update_collection(list_of_osu_files):
+    """manually add beatmaps to .db file
+    create ingame collections https://github.com/osufiles/osuCollectionManager-backup 
+    """
+    backup_db = collection_db.parents[0] / "OFSbackup_collection.db"
+    # read version ,count
+    collection_dict, version = get_collections()
+    # copy as backup.db , osu client on launch will create .bak also
+    if not backup_db.exists():
+        copy(collection_db, backup_db)
+    hashes = []
+    for h in list_of_osu_files:
+        difficultly_hash = md5(h)
+        hashes.append(difficultly_hash)
+    name = file_name
+    collection_dict[name] = hashes
+    with open(collection_db, "wb") as f:
+        # write version int , count int
+        write_int(f, version)
+        write_int(f, len(collection_dict))
+        # for each collection including generated
+        for col_name, col_hashes in collection_dict.items():
+            # write its name string,maps count len(),write hashes md5s
+            write_string(f, col_name)
+            write_int(f, len(col_hashes))
+            for h in col_hashes:
+                write_string(f, h)
+    print("Export to db complete,quantity: ", len(list_of_osu_files))
 
 
 if __name__ == "__main__":
@@ -182,9 +295,6 @@ if __name__ == "__main__":
     of = get_osu_files(Path(song_path))
     with Pool() as pool:
         audios = pool.map(_check, of)
-    print(
-        "Found",
-        len(list(filter(None, audios))),
-        "stream maps,check:",
-        '"' + file_name + '"',
-    )
+    dot_osu_files = list(filter(None, audios))
+    print("Found", len(dot_osu_files), "stream maps,check:", '"' + file_name + '"')
+    update_collection(dot_osu_files)
