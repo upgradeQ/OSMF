@@ -2,8 +2,8 @@
 An osu tool for finding stream maps in your map library
 
 # Install 
-python - Python 3.6+
-code - https://github.com/upgradeQ/OSMF/releases/tag/0.1.0
+- python - Python 3.6+
+- get code here - https://github.com/upgradeQ/OSMF/releases/tag/0.2.0
 
 # Using
 - Edit script , set full path to osu/songs.
