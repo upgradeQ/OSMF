@@ -1,18 +1,45 @@
 import time as _time
 import operator
 import hashlib
+import configparser
+import argparse
 from struct import unpack
 from shutil import copy
 from pathlib import Path
 from multiprocessing import Pool
 
-# EDIT THIS
-song_path = r"F:\ULL\PATH\TO\osu\songs"
-min_bpm = 140
-max_bpm = 9999
+text = "min BPM = 140 , max BPM = 9999, default output - stdout. bugs/suggestions ? github.com/upgradeq/OSU-STREAM-DETECTOR"
+parser = argparse.ArgumentParser(description=text)
+parser.add_argument(
+    "--collection",
+    "-c",
+    action="store_true",
+    dest="collection",
+    help="export  to in-game collection",
+)
+parser.add_argument("-a", dest="a", help="Min bpm", default=140, type=int)
+parser.add_argument(
+    "-b", action="store", dest="b", help="Max bpm", default=9999, type=int
+)
 
+args = parser.parse_args()
 
-_p = Path(song_path)
+min_bpm = args.a
+max_bpm = args.b
+
+cli_path = Path(__file__).absolute()
+ini = "stream_detector.ini"
+cfg_path = cli_path.parent / ini
+config = configparser.ConfigParser()
+if not cfg_path.exists():
+    config["osu_songs"] = {}
+    full_path = input("Enter full osu/songs path: ")
+    config["osu_songs"]["path"] = full_path
+    with open(cfg_path, "w") as cfg:
+        config.write(cfg)
+config.read(cfg_path)
+
+_p = Path(config["osu_songs"]["path"])
 collection_db = _p.absolute().parent / "collection.db"
 timestamp = int(_time.time())
 file_name = f"Stream maps[{min_bpm}-{max_bpm}] {timestamp}.txt"
@@ -151,6 +178,7 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
         stream_percentage = 0
 
     if stream_percentage >= 25 and main_bpm >= min_bpm and main_bpm <= max_bpm:
+
         with open(file_name, "a") as f:
             print(
                 beatmap["title"], beatmap["difficulty"], f" {int(stream_percentage)}%"
@@ -202,8 +230,8 @@ def nextstr(f):
     shift = 0
     while True:
         byte = ord(f.read(1))
-        len |= (byte & 0b01111111) << shift
-        if (byte & 0b10000000) == 0:
+        len |= (byte & 0x7F) << shift
+        if (byte & 0x80) == 0:
             break
         shift += 7
     return f.read(len).decode("utf-8")
@@ -274,6 +302,9 @@ def update_collection(list_of_osu_files):
     for h in list_of_osu_files:
         difficultly_hash = md5(h)
         hashes.append(difficultly_hash)
+    if not hashes:
+        print("0 maps to export , abort")
+        return
     name = file_name
     collection_dict[name] = hashes
     with open(collection_db, "wb") as f:
@@ -290,11 +321,20 @@ def update_collection(list_of_osu_files):
     print("Export to db complete,quantity: ", len(list_of_osu_files))
 
 
-if __name__ == "__main__":
+def main():
 
-    of = get_osu_files(Path(song_path))
+    of = get_osu_files(Path(_p))
     with Pool() as pool:
         audios = pool.map(_check, of)
     dot_osu_files = list(filter(None, audios))
-    print("Found", len(dot_osu_files), "stream maps,check:", '"' + file_name + '"')
-    update_collection(dot_osu_files)
+    count = len(dot_osu_files)
+    if count == 0:
+        print("Not found")
+        return
+    print("Found", count, "stream maps,check:", '"' + file_name + '"')
+    if args.collection:
+        update_collection(dot_osu_files)
+
+
+if __name__ == "__main__":
+    main()
