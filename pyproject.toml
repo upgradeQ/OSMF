@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "osustreams"
-version = "0.1.0"
+version = "1.0.0"
 description = "find stream maps in your osu library"
 authors = ["upgradeq <noreply@example.com>"]
 readme = "README.md"

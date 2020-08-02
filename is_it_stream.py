@@ -8,7 +8,7 @@ from shutil import copy
 from pathlib import Path
 from multiprocessing import Pool
 
-text = "min BPM = 140 , max BPM = 9999, default output - stdout. bugs/suggestions ? github.com/upgradeq/OSU-STREAM-DETECTOR"
+text = "bugs/suggestions ? github.com/upgradeq/OSU-STREAM-DETECTOR/issues"
 parser = argparse.ArgumentParser(description=text)
 parser.add_argument(
     "--collection",
@@ -20,6 +20,9 @@ parser.add_argument(
 parser.add_argument("-a", dest="a", help="Min bpm", default=140, type=int)
 parser.add_argument(
     "-b", action="store", dest="b", help="Max bpm", default=9999, type=int
+)
+parser.add_argument(
+    "--ignore", "-i", action="store_true", dest="ignore", help="ignore bad unicode"
 )
 
 args = parser.parse_args()
@@ -54,7 +57,15 @@ def adjust_beat_length(beat_length, new_bpm):
 
 
 def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
-    raw_map = open(of, "r", encoding="utf8").readlines()
+    try:
+        if not args.ignore:
+            raw_map = open(of, "r", encoding="utf8").readlines()
+        else:
+            raw_map = open(of, "r", encoding="utf8", errors="ignore").readlines()
+    except UnicodeDecodeError:
+        print(f"cannot read beatmap , reason - bad encoding , try -i option")
+        return False
+
     if raw_map[0] != "osu file format v14\n":
         return False
     timing_points_index = raw_map.index("[TimingPoints]\n")
@@ -183,9 +194,12 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
             print(
                 beatmap["title"], beatmap["difficulty"], f" {int(stream_percentage)}%"
             )
-            f.write(
-                f'{beatmap["artist"]} - {beatmap["title"]} [{beatmap["difficulty"]}] | Main BPM: {main_bpm} | Total Streams: {total_streams} ({int(stream_percentage)}% Streams)\n'
-            )
+            try:
+                f.write(
+                    f'{beatmap["artist"]} - {beatmap["title"]} [{beatmap["difficulty"]}] | Main BPM: {main_bpm} | Total Streams: {total_streams} ({int(stream_percentage)}% Streams)\n'
+                )
+            except UnicodeEncodeError:
+                print("error, cannot write result to file (bad encoding)")
             return of
     return False
 

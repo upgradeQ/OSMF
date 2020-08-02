@@ -19,10 +19,12 @@ optional arguments:
   --collection, -c  export to in-game collection
   -a A              Min bpm
   -b B              Max bpm
+  --ignore, -i      ignore bad unicode
 ```
 - example :`osustreams -a 110 -b 170 -c` 
 - this will create in-game collection with beatmaps where a = min BPM , b = max BPM
 
+stream_detector.ini - should be located in Lib/site-packages (if you wish to edit path to osu/songs) 
 Note: As of current, this tool can only scan maps from around 2016-present due to differences in file formatting
 
 # This is a fork
