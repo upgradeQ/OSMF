@@ -56,6 +56,17 @@ def adjust_beat_length(beat_length, new_bpm):
     return current_bpm, whole, half, quarter
 
 
+def is_it_std_v_14(file_header):
+    if file_header[0] != "osu file format v14\n":
+        return False
+    for line in file_header:
+        if "mode" in line.lower():
+            if str(0) in line:
+                return True
+            return False
+    return False  # not a proper header
+
+
 def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
     try:
         if not args.ignore:
@@ -66,8 +77,9 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
         print(f"cannot read beatmap , reason - bad encoding , try -i option")
         return False
 
-    if raw_map[0] != "osu file format v14\n":
+    if not is_it_std_v_14(raw_map[:20]):
         return False
+
     timing_points_index = raw_map.index("[TimingPoints]\n")
     objects_index = raw_map.index("[HitObjects]\n")
     metadata_index = raw_map.index("[Metadata]\n")
