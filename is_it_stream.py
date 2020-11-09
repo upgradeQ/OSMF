@@ -1,5 +1,4 @@
 import time as _time
-import operator
 import hashlib
 import configparser
 import argparse
@@ -8,7 +7,10 @@ from shutil import copy
 from pathlib import Path
 from multiprocessing import Pool
 
-text = "bugs/suggestions ? github.com/upgradeq/OSU-STREAM-DETECTOR/issues"
+
+__version__ = "1.1.1"
+text = f"Version:{__version__} bugs/suggestions ? github.com/upgradeq/OSU-STREAM-DETECTOR/issues"
+
 parser = argparse.ArgumentParser(description=text)
 parser.add_argument(
     "--collection",
@@ -57,29 +59,35 @@ def adjust_beat_length(beat_length, new_bpm):
 
 
 def is_it_std_v_14(file_header):
-    if file_header[0] != "osu file format v14\n":
-        return False
-    for line in file_header:
-        if "mode" in line.lower():
-            if str(0) in line:
-                return True
+    try:
+        if file_header[0] != "osu file format v14\n":
             return False
-    return False  # not a proper header
+        for line in file_header:
+            if "mode" in line.lower():
+                if "0" in line:
+                    return True
+                return False
+    except:  #  not a proper header
+        return False
+    return False
 
 
-def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
+def try_read_beatmap(of):
     try:
         if not args.ignore:
-            raw_map = open(of, "r", encoding="utf8").readlines()
+            with open(of, "r", encoding="utf8") as f:
+                raw_map = f.readlines()
         else:
-            raw_map = open(of, "r", encoding="utf8", errors="ignore").readlines()
+            with open(of, "r", encoding="utf8", errors="ignore") as f:
+                raw_map = f.readlines()
     except UnicodeDecodeError:
         print(f"cannot read beatmap , reason - bad encoding , try -i option")
         return False
+    else:
+        return raw_map
 
-    if not is_it_std_v_14(raw_map[:20]):
-        return False
 
+def prepare_beatmap(raw_map):
     timing_points_index = raw_map.index("[TimingPoints]\n")
     objects_index = raw_map.index("[HitObjects]\n")
     metadata_index = raw_map.index("[Metadata]\n")
@@ -98,8 +106,12 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
             beatmap["artist"] = raw_map[i][7:-1]
         if raw_map[i].startswith("Version:"):
             beatmap["difficulty"] = raw_map[i][8:-1]
+    return beatmap, timing_points_index, objects_index, metadata_index
 
-    # Determine BPM and BPM changes
+
+def determine(beatmap, timing_points_index, raw_map):  # Determine BPM changes
+    default_bpm = beatmap["bpm"]["default"]
+
     for i in range(timing_points_index + 1, len(raw_map)):
         if raw_map[i] == "\n":
             break
@@ -108,7 +120,6 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
         time = int(float(point[0]))
         beatLength = float(point[1])
         if beatLength > 0:
-            default_bpm = beatmap["bpm"]["default"]
             bpm = str(int(60000 // beatLength))
             if default_bpm["bpm"] == 0:
                 default_bpm["time"] = time
@@ -118,6 +129,10 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
                 beatmap["bpm"]["changes"].append(
                     {"time": time, "bpm": bpm, "beatLength": beatLength}
                 )
+    return beatmap
+
+
+def get_results(objects_index, beatmap, raw_map):
 
     first_object = objects_index + 1
     previous_object = {"time": 0, "x": 0, "y": 0}
@@ -186,7 +201,7 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
         previous_object = hit_object
 
     if len(stream_count) > 0:
-        main_bpm = int(max(stream_count.items(), key=operator.itemgetter(1))[0])
+        main_bpm = int(max(stream_count.items(), key=lambda i: i[1])[0])
     else:
         main_bpm = int(beatmap["bpm"]["default"]["bpm"])
 
@@ -199,6 +214,30 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
         stream_percentage = total_stream_notes / total_object_count * 100
     except ZeroDivisionError:
         stream_percentage = 0
+    return stream_percentage, main_bpm, total_streams
+
+
+def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
+
+    raw_map = try_read_beatmap(of)
+    fn = of.absolute()
+    if not raw_map:
+        return False
+
+    if not is_it_std_v_14(raw_map[:20]):
+        return False
+
+    try:
+        beatmap, timing_points_index, objects_index, metadata_index = prepare_beatmap(
+            raw_map
+        )
+        beatmap = determine(beatmap, timing_points_index, raw_map)
+        stream_percentage, main_bpm, total_streams = get_results(
+            objects_index, beatmap, raw_map
+        )
+    except Exception as e:
+        print(f"Unknown exception {e} while reading file: \n[{fn}]")
+        return False
 
     if stream_percentage >= 25 and main_bpm >= min_bpm and main_bpm <= max_bpm:
 
@@ -211,8 +250,8 @@ def _check(of, min_bpm=min_bpm, max_bpm=max_bpm):
                     f'{beatmap["artist"]} - {beatmap["title"]} [{beatmap["difficulty"]}] | Main BPM: {main_bpm} | Total Streams: {total_streams} ({int(stream_percentage)}% Streams)\n'
                 )
             except UnicodeEncodeError:
-                print("error, cannot write result to file (bad encoding)")
-            return of
+                print("error, cannot write result to file [{fn}] \n (bad encoding)")
+            return of  # it may go into in-game collection later 
     return False
 
 
